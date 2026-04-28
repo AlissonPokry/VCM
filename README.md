@@ -25,5 +25,3 @@ npm run dev
 
 Full developer reference: [DOCUMENTATION.md](DOCUMENTATION.md)  
 n8n setup guide: [N8N_INTEGRATION.md](N8N_INTEGRATION.md)
-# VCM
-# VCM
