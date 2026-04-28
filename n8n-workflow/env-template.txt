@@ -1,0 +1,9 @@
+# n8n Environment Variables for Reel Queue Workflow
+# Add these to your n8n instance environment configuration
+
+# Reel Queue server URL (where the Express API is running)
+REEL_QUEUE_API_URL=http://localhost:3001
+
+# Shared secret for authenticating n8n requests to Reel Queue
+# Must match N8N_WEBHOOK_SECRET in Reel Queue's .env file
+N8N_WEBHOOK_SECRET=change_me_before_production

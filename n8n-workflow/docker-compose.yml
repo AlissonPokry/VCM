@@ -1,0 +1,46 @@
+# n8n Docker Setup for Reel Queue
+# Run: docker-compose up -d
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: reel-queue-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      # n8n base config
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=America/Sao_Paulo
+      - TZ=America/Sao_Paulo
+
+      # Owner account (auto-created on first run)
+      - N8N_OWNER_EMAIL=admin@reelqueue.local
+      - N8N_OWNER_FIRSTNAME=Admin
+      - N8N_OWNER_LASTNAME=ReelQueue
+      - N8N_OWNER_PASSWORD=ReelQueue2025!
+
+      # Reel Queue integration
+      - REEL_QUEUE_API_URL=http://host.docker.internal:3001
+      - N8N_WEBHOOK_SECRET=change_me_before_production
+
+      # Execution settings
+      - EXECUTIONS_DATA_SAVE_ON_ERROR=all
+      - EXECUTIONS_DATA_SAVE_ON_SUCCESS=all
+      - EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS=true
+
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./workflow.json:/home/node/workflow.json:ro
+      - ./init.sh:/home/node/init.sh:ro
+    entrypoint: ["/bin/sh", "/home/node/init.sh"]
+    extra_hosts:
+      # Allows n8n container to reach host machine (where Reel Queue runs)
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  n8n_data:
+    driver: local

@@ -1,0 +1,735 @@
+{
+  "id": "reel-queue-social-posting",
+  "name": "Reel Queue — Social Media Posting",
+  "nodes": [
+    {
+      "id": "schedule-trigger",
+      "name": "Poll Every 5 Min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "fetch-queue",
+      "name": "Fetch Due Videos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.REEL_QUEUE_API_URL || 'http://localhost:3001' }}/api/n8n/queue",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "notes": "Fetches videos where status='scheduled' AND scheduled_at <= now.\nRequires x-n8n-secret header matching Reel Queue's N8N_WEBHOOK_SECRET env var.\n\nSet environment variables in n8n:\n- REEL_QUEUE_API_URL: your Reel Queue server URL\n- N8N_WEBHOOK_SECRET: shared secret"
+    },
+    {
+      "id": "has-videos",
+      "name": "Has Due Videos?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [440, 300],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-has-items",
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty"
+              },
+              "leftValue": "={{ $json }}",
+              "rightValue": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "no-videos",
+      "name": "No Videos Due",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [660, 480],
+      "parameters": {}
+    },
+    {
+      "id": "loop-videos",
+      "name": "Process Each Video",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 300],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "set-video-data",
+      "name": "Extract Video Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [880, 300],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-video-id",
+              "name": "videoId",
+              "type": "number",
+              "value": "={{ $json.id }}"
+            },
+            {
+              "id": "assign-title",
+              "name": "title",
+              "type": "string",
+              "value": "={{ $json.title || 'Untitled Video' }}"
+            },
+            {
+              "id": "assign-description",
+              "name": "description",
+              "type": "string",
+              "value": "={{ $json.description || '' }}"
+            },
+            {
+              "id": "assign-platform",
+              "name": "platform",
+              "type": "string",
+              "value": "={{ $json.platform }}"
+            },
+            {
+              "id": "assign-drive-id",
+              "name": "googleDriveFileId",
+              "type": "string",
+              "value": "={{ $json.google_drive_file_id }}"
+            },
+            {
+              "id": "assign-tags",
+              "name": "tags",
+              "type": "string",
+              "value": "={{ ($json.tags || []).map(t => t.name || t).join(',') }}"
+            },
+            {
+              "id": "assign-scheduled-at",
+              "name": "scheduledAt",
+              "type": "string",
+              "value": "={{ $json.scheduled_at }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "Extracts and normalizes video data from queue response.\nFields: videoId, title, description, platform, googleDriveFileId, tags, scheduledAt"
+    },
+    {
+      "id": "download-drive",
+      "name": "Download from Google Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1100, 300],
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.googleDriveFileId }}"
+        },
+        "options": {}
+      },
+      "notes": "Downloads video file from Google Drive using file ID from Reel Queue.\n\nRequires Google Drive OAuth2 credentials configured in n8n.\nSetup: n8n Settings → Credentials → Google Drive OAuth2"
+    },
+    {
+      "id": "platform-router",
+      "name": "Route by Platform",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [1320, 300],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "youtube",
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $('Extract Video Data').item.json.platform }}",
+                    "rightValue": "youtube"
+                  }
+                ]
+              }
+            },
+            {
+              "outputKey": "tiktok",
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $('Extract Video Data').item.json.platform }}",
+                    "rightValue": "tiktok"
+                  }
+                ]
+              }
+            },
+            {
+              "outputKey": "all",
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $('Extract Video Data').item.json.platform }}",
+                    "rightValue": "all"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      }
+    },
+    {
+      "id": "upload-youtube",
+      "name": "Upload to YouTube",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1580, 120],
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "body": "={{ $binary.data }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "video/*"
+            },
+            {
+              "name": "X-Upload-Content-Type",
+              "value": "video/*"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "notes": "⚠️ PLACEHOLDER — YouTube Data API v3 Upload\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTO CONFIGURE WHEN READY:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n1. Create Google Cloud Project:\n   → https://console.cloud.google.com\n\n2. Enable YouTube Data API v3:\n   → APIs & Services → Library → YouTube Data API v3\n\n3. Create OAuth2 credentials:\n   → APIs & Services → Credentials → Create OAuth 2.0 Client ID\n   → Scopes: https://www.googleapis.com/auth/youtube.upload\n\n4. In n8n, create Google OAuth2 credential:\n   → Settings → Credentials → Google OAuth2 API\n   → Paste Client ID + Client Secret\n\n5. Replace this HTTP Request node with the YouTube node\n   or configure OAuth2 authentication properly.\n\nAPI Docs: https://developers.google.com/youtube/v3/docs/videos/insert\n\nRequest body should include:\n{\n  \"snippet\": {\n    \"title\": \"Video Title\",\n    \"description\": \"Video Description\",\n    \"tags\": [\"tag1\", \"tag2\"],\n    \"categoryId\": \"22\"\n  },\n  \"status\": {\n    \"privacyStatus\": \"public\",\n    \"selfDeclaredMadeForKids\": false\n  }\n}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    },
+    {
+      "id": "upload-tiktok",
+      "name": "Upload to TikTok",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1580, 340],
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.tiktokapis.com/v2/post/publish/video/init/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"post_info\": {\n    \"title\": \"{{ $('Extract Video Data').item.json.title }}\",\n    \"privacy_level\": \"PUBLIC_TO_EVERYONE\",\n    \"disable_duet\": false,\n    \"disable_comment\": false,\n    \"disable_stitch\": false\n  },\n  \"source_info\": {\n    \"source\": \"FILE_UPLOAD\",\n    \"video_size\": 0\n  }\n}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_TIKTOK_ACCESS_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json; charset=UTF-8"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "notes": "⚠️ PLACEHOLDER — TikTok Content Posting API\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTO CONFIGURE WHEN READY:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n1. Register TikTok Developer App:\n   → https://developers.tiktok.com\n\n2. Request 'video.upload' + 'video.publish' scopes\n\n3. Implement OAuth2 flow to get access token\n\n4. TikTok upload is 2-step:\n   Step 1: POST /v2/post/publish/video/init/\n     → Returns upload_url\n   Step 2: PUT upload_url with video binary\n     → Returns publish_id\n\n5. In n8n, create OAuth2 credential for TikTok\n   or use HTTP Header Auth with Bearer token.\n\nAPI Docs: https://developers.tiktok.com/doc/content-posting-api-get-started\n\nPrivacy levels:\n- PUBLIC_TO_EVERYONE\n- MUTUAL_FOLLOW_FRIENDS\n- FOLLOWER_OF_CREATOR\n- SELF_ONLY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    },
+    {
+      "id": "upload-youtube-all",
+      "name": "YouTube (All Platforms)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1580, 540],
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "body": "={{ $binary.data }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "notes": "⚠️ PLACEHOLDER — Same as 'Upload to YouTube' node.\nUsed when platform='all' to upload to both YouTube AND TikTok.\nSee 'Upload to YouTube' node notes for full setup guide."
+    },
+    {
+      "id": "upload-tiktok-all",
+      "name": "TikTok (All Platforms)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1800, 540],
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.tiktokapis.com/v2/post/publish/video/init/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"post_info\": {\n    \"title\": \"{{ $('Extract Video Data').item.json.title }}\",\n    \"privacy_level\": \"PUBLIC_TO_EVERYONE\"\n  },\n  \"source_info\": {\n    \"source\": \"FILE_UPLOAD\"\n  }\n}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "notes": "⚠️ PLACEHOLDER — Same as 'Upload to TikTok' node.\nUsed when platform='all'. See 'Upload to TikTok' node notes for setup."
+    },
+    {
+      "id": "merge-all-platforms",
+      "name": "Merge All Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [2020, 540],
+      "parameters": {
+        "mode": "append"
+      }
+    },
+    {
+      "id": "report-success-yt",
+      "name": "Report YouTube Success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1800, 120],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.REEL_QUEUE_API_URL || 'http://localhost:3001' }}/api/n8n/webhook/posted",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"video_id\": {{ $('Extract Video Data').item.json.videoId }},\n  \"posted_at\": \"{{ $now.toISO() }}\",\n  \"platform\": \"youtube\",\n  \"execution_id\": \"{{ $execution.id }}\"\n}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET || '' }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "report-success-tt",
+      "name": "Report TikTok Success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1800, 340],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.REEL_QUEUE_API_URL || 'http://localhost:3001' }}/api/n8n/webhook/posted",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"video_id\": {{ $('Extract Video Data').item.json.videoId }},\n  \"posted_at\": \"{{ $now.toISO() }}\",\n  \"platform\": \"tiktok\",\n  \"execution_id\": \"{{ $execution.id }}\"\n}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET || '' }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "report-success-all",
+      "name": "Report All Success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2240, 540],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.REEL_QUEUE_API_URL || 'http://localhost:3001' }}/api/n8n/webhook/posted",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"video_id\": {{ $('Extract Video Data').item.json.videoId }},\n  \"posted_at\": \"{{ $now.toISO() }}\",\n  \"platform\": \"all\",\n  \"execution_id\": \"{{ $execution.id }}\"\n}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET || '' }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "back-to-loop-yt",
+      "name": "Next Video (YT)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2020, 120],
+      "parameters": {}
+    },
+    {
+      "id": "back-to-loop-tt",
+      "name": "Next Video (TT)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2020, 340],
+      "parameters": {}
+    },
+    {
+      "id": "error-trigger",
+      "name": "On Error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [0, 600],
+      "parameters": {}
+    },
+    {
+      "id": "report-failure",
+      "name": "Report Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 600],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.REEL_QUEUE_API_URL || 'http://localhost:3001' }}/api/n8n/webhook/failed",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"video_id\": {{ $json.execution?.lastNodeExecuted ? $('Extract Video Data').item.json.videoId : 0 }},\n  \"error\": \"{{ $json.execution?.error?.message || 'Unknown execution error' }}\",\n  \"execution_id\": \"{{ $json.execution?.id || $execution.id }}\"\n}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET || '' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "Reports execution failure to Reel Queue.\nVideo status stays 'scheduled' — does NOT change to failed.\nUser can retry manually or wait for next poll cycle."
+    }
+  ],
+  "connections": {
+    "Poll Every 5 Min": {
+      "main": [
+        [
+          {
+            "node": "Fetch Due Videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Due Videos": {
+      "main": [
+        [
+          {
+            "node": "Has Due Videos?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Due Videos?": {
+      "main": [
+        [
+          {
+            "node": "Process Each Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Videos Due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Each Video": {
+      "main": [
+        [
+          {
+            "node": "Extract Video Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Video Data": {
+      "main": [
+        [
+          {
+            "node": "Download from Google Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download from Google Drive": {
+      "main": [
+        [
+          {
+            "node": "Route by Platform",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Platform": {
+      "main": [
+        [
+          {
+            "node": "Upload to YouTube",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upload to TikTok",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "YouTube (All Platforms)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "TikTok (All Platforms)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to YouTube": {
+      "main": [
+        [
+          {
+            "node": "Report YouTube Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to TikTok": {
+      "main": [
+        [
+          {
+            "node": "Report TikTok Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report YouTube Success": {
+      "main": [
+        [
+          {
+            "node": "Next Video (YT)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report TikTok Success": {
+      "main": [
+        [
+          {
+            "node": "Next Video (TT)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Next Video (YT)": {
+      "main": [
+        [
+          {
+            "node": "Process Each Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Next Video (TT)": {
+      "main": [
+        [
+          {
+            "node": "Process Each Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube (All Platforms)": {
+      "main": [
+        [
+          {
+            "node": "Merge All Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TikTok (All Platforms)": {
+      "main": [
+        [
+          {
+            "node": "Merge All Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge All Results": {
+      "main": [
+        [
+          {
+            "node": "Report All Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report All Success": {
+      "main": [
+        [
+          {
+            "node": "Process Each Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On Error": {
+      "main": [
+        [
+          {
+            "node": "Report Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "reel-queue"
+    },
+    {
+      "name": "social-media"
+    },
+    {
+      "name": "automation"
+    }
+  ],
+  "pinData": {},
+  "meta": {
+    "instanceId": "",
+    "templateCredsSetupCompleted": false
+  }
+}
