@@ -1,0 +1,20 @@
+{
+  "name": "vcm-vertical-content-manager",
+  "private": true,
+  "version": "1.0.0",
+  "description": "V.C.M (Vertical Content Manager) for scheduling vertical social videos.",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "cd server && node --watch server.js",
+    "dev:client": "cd client && vite",
+    "build": "cd client && vite build",
+    "migrate": "cd server && node db/runMigrations.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
