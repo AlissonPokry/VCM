@@ -4,15 +4,16 @@
   "version": "1.0.0",
   "description": "V.C.M (Vertical Content Manager) for scheduling vertical social videos.",
   "workspaces": [
-    "client",
-    "server"
+    "client"
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "dev:server": "cd server && node --watch server.js",
+    "dev:server": "cd server && powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/go-env.ps1 go run main.go",
     "dev:client": "cd client && vite",
-    "build": "cd client && vite build",
-    "migrate": "cd server && node db/runMigrations.js"
+    "build": "concurrently \"npm run build:server\" \"npm run build:client\"",
+    "build:server": "cd server && powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/go-env.ps1 go build -o bin/reelqueue-server .",
+    "build:client": "cd client && vite build",
+    "migrate": "cd server && powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/go-env.ps1 go run main.go --migrate-only"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

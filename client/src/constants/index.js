@@ -7,6 +7,7 @@ export const PLATFORMS = [
 
 export const STATUSES = [
   { value: 'scheduled', label: 'Scheduled', classes: 'text-amber-400 bg-amber-400/10' },
+  { value: 'partial', label: 'Partial', classes: 'text-orange-400 bg-orange-400/10' },
   { value: 'posted', label: 'Posted', classes: 'text-emerald-400 bg-emerald-400/10' },
   { value: 'draft', label: 'Draft', classes: 'text-muted bg-white/5' }
 ];

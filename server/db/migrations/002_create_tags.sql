@@ -1,0 +1,15 @@
+CREATE TABLE IF NOT EXISTS tags (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(name COLLATE NOCASE)
+);
+
+CREATE TABLE IF NOT EXISTS video_tags (
+  video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+  tag_id   INTEGER NOT NULL REFERENCES tags(id)   ON DELETE CASCADE,
+  PRIMARY KEY (video_id, tag_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vt_video ON video_tags (video_id);
+CREATE INDEX IF NOT EXISTS idx_vt_tag   ON video_tags (tag_id);

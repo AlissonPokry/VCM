@@ -2,200 +2,207 @@
 
 ## 1. Project Overview
 
-V.C.M is a single-user vertical content manager for short-form video workflows. It helps creators and operators upload video files, schedule posts, track published items, inspect activity, and connect an n8n automation that polls due videos and reports posting results.
+V.C.M is a local-first vertical video scheduling dashboard for Reels, TikTok, and YouTube Shorts. It uploads video files, schedules posts, tracks publishing status, records activity, exposes analytics, and provides secret-protected n8n automation endpoints.
 
-Capabilities:
-- Upload video files with metadata, schedule, platform, and tags.
-- Extract thumbnails and duration with bundled FFmpeg.
-- Browse scheduled and posted queues with search, platform, tag, date, and sort filters.
-- Edit video metadata and status from a responsive detail panel.
-- Run bulk delete, draft, and reschedule actions.
-- Review analytics, heatmaps, platform counts, tag usage, and activity history.
-- Expose secret-protected n8n queue and webhook endpoints.
+The backend is now a Go service. The frontend API contract remains unchanged: `client/src/api/*.js` still calls the same routes and receives the same response envelopes.
 
 ## 2. Tech Stack
 
-| Layer | Technology | Version Target |
-|---|---|---|
-| Frontend | Vue 3, Composition API, `<script setup>` | `^3.5` |
-| Styling | Tailwind CSS | `^3.4` |
-| Backend | Node.js + Express | Node 20, Express 4 |
-| Database | SQLite via `better-sqlite3` | `^11` runtime |
-| Query Builder | Knex | `^3` |
-| Uploads | Multer | `1.4.5-lts` |
-| Video Processing | fluent-ffmpeg + ffmpeg-static | bundled binary |
-| HTTP Client | Axios | `^1` |
-| State | Pinia | `^2` |
-| Router | Vue Router | `^4` |
-| Icons | Lucide Vue Next | `^0.468` |
+| Layer | Technology |
+|---|---|
+| Frontend | Vue 3, Pinia, Vue Router, Tailwind CSS, Axios |
+| Backend | Go 1.22+, `net/http`, `chi` v5 |
+| Database | SQLite via `database/sql` and `mattn/go-sqlite3` |
+| Migrations | `golang-migrate/migrate` with ordered SQL files |
+| Video Processing | `u2takey/ffmpeg-go` over system FFmpeg |
+| Config | `joho/godotenv` plus typed Go config |
+| IDs | `google/uuid` for uploaded filenames |
 
-SQLite was chosen because v1 is a local-first, single-user tool where simple deployment and persistent files matter more than distributed writes.
+SQLite remains the storage engine because this project is local-first and single-user. The Go backend enables stronger concurrency, simpler deployment binaries, and parallel platform dispatch for multi-platform posting.
 
 ## 3. Prerequisites
 
-- Node.js v20+
-- npm v9+
-- No system FFmpeg install is required; `ffmpeg-static` provides the binary.
-- A writable project directory for SQLite, uploads, thumbnails, and build output.
+- Node.js v20+ and npm v9+ for the Vue client and root scripts.
+- Go 1.22+ for the backend.
+- GCC or another CGO-compatible C compiler. `mattn/go-sqlite3` requires CGO.
+- FFmpeg installed on `PATH` for thumbnail and duration extraction. If FFmpeg is missing, uploads still work, but thumbnail processing is disabled with a startup warning.
+- Writable project directory for SQLite, uploads, thumbnails, and Go build output.
 
 ## 4. Installation & Setup
 
-1. Clone or open the project folder.
-2. Run `npm install` from the root to install root, client, and server workspace dependencies.
-3. Copy `.env.example` to `.env` and change `N8N_WEBHOOK_SECRET`.
-4. Run `npm run migrate` to create SQLite tables.
-5. Run `npm run dev` to start Express on `http://localhost:3001` and Vite on `http://localhost:5173`.
+```bash
+npm install
+cp .env.example .env
+npm run migrate
+npm run dev
+```
 
-## 5. Environment Variables Reference
+Root scripts:
 
-| Variable | Default | Required | Description |
-|---|---:|---|---|
-| `PORT` | `3001` | No | Express API port |
-| `NODE_ENV` | `development` | No | Runtime mode |
-| `DB_PATH` | `./server/db/reel_queue.sqlite` | No | SQLite file path |
-| `UPLOAD_DIR` | `./server/uploads` | No | Uploaded video storage |
-| `THUMBNAIL_DIR` | `./server/thumbnails` | No | Extracted JPEG thumbnail storage |
-| `MAX_FILE_SIZE_MB` | `500` | No | Multer upload size limit |
-| `N8N_WEBHOOK_SECRET` | `change_me_before_production` | Yes for n8n | Secret checked against `x-n8n-secret` |
-| `CORS_ORIGIN` | `http://localhost:5173` | No | Allowed frontend origin |
+| Script | Command |
+|---|---|
+| `npm run dev` | Starts Go API and Vite client together |
+| `npm run dev:server` | Runs `go run main.go` inside `server/` |
+| `npm run dev:client` | Runs Vite inside `client/` |
+| `npm run build` | Builds Go server binary and Vue client |
+| `npm run migrate` | Runs Go migrations only, then exits |
 
-## 6. Application Architecture
+## 5. Environment Variables
+
+| Variable | Default | Description |
+|---|---:|---|
+| `PORT` | `3001` | Go API port |
+| `APP_ENV` | `development` | Runtime mode; production skips `.env` loading |
+| `DB_PATH` | `./server/db/reel_queue.sqlite` | SQLite file path |
+| `UPLOAD_DIR` | `./server/uploads` | Uploaded video storage |
+| `THUMBNAIL_DIR` | `./server/thumbnails` | Extracted JPEG thumbnail storage |
+| `MAX_FILE_SIZE_MB` | `500` | Upload limit |
+| `N8N_WEBHOOK_SECRET` | `change_me_before_production` | Required `x-n8n-secret` value |
+| `CORS_ORIGIN` | `http://localhost:5173` | Allowed frontend origin |
+| `PLATFORM_DISPATCH_TIMEOUT_SECONDS` | `60` | Per-platform dispatch timeout |
+
+## 6. Architecture
 
 ```text
 Vue SPA + Pinia + Axios
           |
           v
-Express REST API ---- n8n polling/webhooks
+Go chi REST API ---- n8n polling/webhooks
           |
           v
-Knex + SQLite + local uploads/thumbnails
+database/sql + SQLite + local uploads/thumbnails
 ```
 
-The frontend owns user interaction and state. The Express API owns validation, file handling, DB updates, activity logging, analytics, and n8n integration. SQLite stores metadata, tags, junction rows, and activity events. Video files and thumbnails stay on disk.
+Backend structure:
 
-## 7. Database Schema Reference
+```text
+server/
+  main.go
+  config/
+  db/
+  handlers/
+  middleware/
+  models/
+  services/
+  uploads/
+  thumbnails/
+```
 
-`videos`: primary record for each upload. Stores title, description, disk filename, original filename, size, duration, thumbnail path, platform, status, schedule/post timestamps, optional n8n workflow id, JSON execution log, and timestamps.
+Handlers own HTTP parsing and response envelopes. Services own business rules, DB writes, activity logging, thumbnail processing, analytics, and n8n platform dispatch. DB access uses parameterized SQL through `database/sql`.
 
-`tags`: normalized tag names with case-insensitive uniqueness.
+## 7. Database
 
-`video_tags`: junction table connecting videos and tags. Composite primary key prevents duplicate tag links.
+Migrations are SQL files under `server/db/migrations`:
 
-`activity_log`: append-only audit events with optional `video_id`, action, detail, source, and created timestamp.
+- `001_create_videos.sql`
+- `002_create_tags.sql`
+- `003_create_activity_log.sql`
 
-Add schema changes as new Knex migration files under `server/db/migrations`. Do not edit applied migrations.
+The schema is unchanged from the original application: `videos`, `tags`, `video_tags`, and `activity_log`. The Go DB opener enables WAL mode, foreign keys, normal synchronous mode, a 64 MB page cache, a 5 second busy timeout, and a single open SQLite connection.
 
-## 8. API Reference
+## 8. API Contract
 
-All success responses use `{ "success": true, "data": value, "meta": object }`. Errors use `{ "error": true, "message": string, "code": string }`.
+Success responses:
+
+```json
+{ "success": true, "data": {}, "meta": {} }
+```
+
+Error responses:
+
+```json
+{ "error": true, "message": "Message", "code": "STABLE_CODE" }
+```
 
 Videos:
-- `GET /api/videos`: query `status`, `platform`, `tag`, `search`, `sort`, `order`, `dateFrom`, `dateTo`; returns videos with `tags`.
-- `GET /api/videos/:id`: returns one video with `tags`.
-- `POST /api/videos/upload`: multipart `file`, `title`, `description`, `platform`, `scheduled_at`, `tags`; creates video, thumbnail, duration, activity.
-- `PATCH /api/videos/:id`: updates metadata and tags.
-- `PATCH /api/videos/:id/status`: body `{ "status": "scheduled" | "posted" | "draft" }`.
-- `POST /api/videos/bulk`: body `{ "ids": [], "action": "delete" | "draft" | "reschedule", "scheduled_at": "..." }`.
-- `DELETE /api/videos/:id`: deletes DB row, file, and thumbnail.
-- `GET /api/videos/:id/thumbnail`: serves JPEG thumbnail.
-- `GET /api/videos/:id/file`: serves the video file.
+
+- `GET /api/videos`
+- `GET /api/videos/:id`
+- `POST /api/videos/upload`
+- `PATCH /api/videos/:id`
+- `PATCH /api/videos/:id/status`
+- `POST /api/videos/bulk`
+- `DELETE /api/videos/:id`
+- `GET /api/videos/:id/thumbnail`
+- `GET /api/videos/:id/file`
 
 Tags:
-- `GET /api/tags`: returns `{ id, name, count }` sorted by usage.
+
+- `GET /api/tags`
 
 Analytics:
-- `GET /api/analytics/summary`: returns all KPI totals and platform breakdown.
-- `GET /api/analytics/heatmap`: returns posted counts for days with activity in the last 90 days.
+
+- `GET /api/analytics/summary`
+- `GET /api/analytics/heatmap`
 
 Activity:
-- `GET /api/activity`: query `limit`, `offset`, optional `video_id`; returns paginated activity entries with video title.
+
+- `GET /api/activity`
 
 n8n:
-- `GET /api/n8n/queue`: secret-protected; returns due scheduled videos.
-- `POST /api/n8n/webhook/posted`: secret-protected; marks video posted and logs execution.
-- `POST /api/n8n/webhook/failed`: secret-protected; logs failure only.
+
+- `GET /api/n8n/queue`
+- `POST /api/n8n/webhook/posted`
+- `POST /api/n8n/webhook/failed`
 
 Health:
-- `GET /api/health`: basic API health.
-- `GET /api/health/n8n`: public reachability check for the sidebar dot.
 
-## 9. Key Components Reference
+- `GET /api/health`
+- `GET /api/health/n8n`
 
-- `DropZone`: drag/drop and file picker, per-file upload form, `TagInput`, `UploadProgress`; emits `upload-complete`.
-- `VideoCard`: thumbnail/placeholder, hover controls, status badge, metadata, tags, bulk checkbox; opens `VideoModal`.
-- `VideoGrid`: responsive grid, skeletons, empty state, card stagger.
-- `VideoModal`: video playback, editable metadata, tags, status action, delete dialog, mini `ActivityFeed`.
-- `BulkActionBar`: selected count, reschedule, draft, delete selected.
-- `FilterBar`: debounced search, platform controls, date range, sort, tag chips, mobile sheet.
-- `TagInput`: chip input, autocomplete, create-new option, `v-model` string array.
-- `ActivityFeed`: paginated activity list, n8n chip, auto-refresh every 30 seconds.
-- `StatCard`: KPI tile with optional trend and skeleton state.
-- `PostingHeatmap`: pure CSS grid for last 90 days.
+## 9. Status Values
 
-## 10. State Management Reference
+Valid statuses:
 
-`videoStore`: holds `videos`, `filters`, `selectedIds`, `loading`, `selectedVideo`, `total`. Actions fetch, upload, update, status-change, bulk action, delete, filter mutate, select, clear, open.
+- `scheduled`
+- `posted`
+- `draft`
+- `partial`
 
-`tagStore`: holds `tags`; `fetchTags()` calls `GET /api/tags`.
+`partial` is used when a multi-platform post succeeds on at least one platform and fails on another. The frontend status constant now includes an orange badge style for this state.
 
-`activityStore`: holds `entries`, `total`, `loading`, pagination. `fetchActivity()` resets page, `loadMore()` appends.
+## 10. Uploads And Media
 
-`uiStore`: holds `activeModal`, `toasts`, `isDraggingFile`. Toasts auto-dismiss after duration.
+Upload validation uses server-side MIME detection from the first 512 bytes and requires a `video/*` type. Uploaded files receive UUID-based filenames. `GET /api/videos/:id/file` uses `http.ServeContent`, preserving range requests so browser video seeking works.
 
-## 11. n8n Integration Guide
+Thumbnail processing is asynchronous. The upload response is not blocked by FFmpeg. Processing extracts one padded `640x360` JPEG frame and stores rounded duration in seconds. If processing fails, the video remains usable with `thumbnail = null` and `duration = null`.
 
-n8n should use an HTTP Request node to poll `GET /api/n8n/queue` with `x-n8n-secret`. For each returned video, the workflow can download or stream `/api/videos/:id/file`, post to a platform, then call either success or failure webhook. A success call marks `posted`; a failure call leaves status unchanged. Inspect `n8n_execution_log` on the video record and activity entries to debug.
+## 11. n8n Integration
 
-## 12. FFmpeg & Thumbnail System
+All `/api/n8n/*` routes require `x-n8n-secret`. The queue endpoint returns due scheduled videos where `status = scheduled` and `scheduled_at <= now`.
 
-`thumbnailService.processVideo(inputPath, outputBasename)` probes duration and extracts one `640x360` JPEG frame near one second. The service catches FFmpeg errors and returns `null` fields instead of throwing, so uploads still succeed when video processing fails.
+The posted webhook appends execution log entries. When the stored video platform is `all`, the Go dispatcher expands to `instagram`, `tiktok`, and `youtube`, runs each platform post concurrently with goroutines, collects results through a buffered channel, writes one unified execution log update, and sets:
 
-## 13. Tag System
+- `posted` when all platforms succeed.
+- `partial` when any platform fails.
 
-Tags are normalized to avoid duplicated free-text metadata. `tagService.upsertTags(videoId, tagNames)` clears current links, inserts missing tag names with `INSERT OR IGNORE`, and writes junction rows. API responses call `attachTags()` so the frontend always receives plain `tags: string[]`.
+Current platform posting is a stub in `server/services/platform_dispatcher.go`. It logs `STUB: would post...`, waits two seconds, and returns success unless the configured timeout is shorter.
 
-## 14. Analytics Reference
+## 12. Security Model
 
-- `totalUploaded`: count of all videos.
-- `totalPosted`: count where `status = posted`.
-- `totalScheduled`: count where `status = scheduled`.
-- `totalDraft`: count where `status = draft`.
-- `postsThisWeek`: posted rows in the current week window.
-- `postsLastWeek`: posted rows in the previous week window.
-- `weeklyTrend`: percentage change from last week.
-- `avgPostsPerWeek`: posted count divided by distinct posted weeks.
-- `mostActivePlatform`: posted platform with highest count.
-- `totalStorageBytes`: sum of video file sizes.
-- `platformBreakdown`: grouped counts by platform.
-- `heatmap`: grouped posted count by `date(posted_at)`.
+- Strict CORS from `CORS_ORIGIN`.
+- Secret-protected n8n endpoints.
+- Parameterized SQL only.
+- Upload size limit and MIME allowlist.
+- Path traversal prevention for served local files.
+- Panic recovery in chi middleware and all backend goroutine entry points.
+- API-safe error envelopes.
 
-## 15. Activity Log Reference
+## 13. Observability
 
-Actions: `uploaded`, `edited`, `status_changed`, `deleted`, `n8n_queued`, `n8n_posted`, `n8n_failed`. Source is `user` for UI actions and `n8n` for automation events. Calls use `activityService.log(...).catch(console.error)` so logging never blocks the main operation.
+The API uses chi request logging. Activity events are written for uploads, edits, status changes, deletes, n8n queue pickup, n8n success, and n8n failure. Activity writes are fire-and-forget and cannot fail the primary request.
 
-## 16. Adding a New Platform
+## 14. Deployment Notes
 
-1. Add the platform in `client/src/constants/index.js`.
-2. Add or reuse a Lucide icon in components that display platforms.
-3. Add a CSS segment color if the analytics breakdown should show a distinct bar.
-4. Update n8n workflow platform routing.
-5. No migration is required because `platform` is a string.
+Build the backend with:
 
-## 17. Deployment Notes
+```bash
+cd server
+go build -o bin/reelqueue-server .
+```
 
-Run `npm run build` to create `client/dist`. In production, serve that static directory from Express or a static host, run `NODE_ENV=production`, keep SQLite/uploads/thumbnails on persistent storage, and rotate `N8N_WEBHOOK_SECRET` when n8n credentials change. Back up `server/db/*.sqlite` and file storage together.
+Production hosts must install Go build dependencies, GCC for CGO, and FFmpeg. Keep SQLite, uploads, and thumbnails on persistent storage and back them up together.
 
-## 18. Known Limitations
+## 15. Change Reference
 
-- Single-user; no login or role model.
-- No video re-encoding or transcoding.
-- SQLite is excellent for this local v1 but not for high-concurrency multi-user workloads.
-- Social platform posting is delegated to n8n; V.C.M does not call platform APIs directly.
-
-## 19. Responsive Design Reference
-
-Sidebar: fixed 240px on `lg+`, icon rail on `md`, drawer below `md`. Video grid: 4/3/2/1 columns from `xl` to mobile. Video modal: right panel on `lg+`, bottom sheet below. FilterBar: full row on `md+`, bottom sheet below. Analytics: 4-column KPI grid on `lg+`, 2-column KPI on smaller screens. Touch targets use at least 44px height, and cards support long-press context actions on touch.
-
-## 20. Animation & Interaction Reference
-
-Route transitions fade and translate by 8px using `--transition-base`. Cards stagger with 40ms intervals capped at 10. Card hover lifts thumbnail brightness and reveals overlay controls. Bulk bar uses spring slide-up. Toasts slide from the right and auto-dismiss. Filter chips scale/fade. Sidebar active indicator moves vertically. n8n status dot pulses when reachable. Skeleton loaders use a shimmer keyframe.
+Detailed migration notes live in [GO_BACKEND_REFACTOR.md](GO_BACKEND_REFACTOR.md).

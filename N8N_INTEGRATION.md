@@ -5,7 +5,7 @@
 ```text
 +------------------------------+     GET /api/n8n/queue      +-------------+
 | V.C.M (Vertical Content Mgr)  | <-------------------------- |     n8n     |
-| Express API + SQLite          |                             |  polling    |
+| Go API + SQLite               |                             |  polling    |
 |                              | ---- POST /webhook/posted -> |             |
 |                              | ---- POST /webhook/failed -> |             |
 +------------------------------+                             +-------------+
@@ -44,6 +44,8 @@ Body: {
 ```
 
 Success changes the video to `posted`, writes `posted_at`, appends one `n8n_execution_log` entry, and writes `n8n_posted` activity.
+
+If the stored video platform is `all`, the Go backend expands it to Instagram, TikTok, and YouTube, dispatches all platform posts in parallel, appends one execution-log entry per platform, then sets status to `posted` when all succeed or `partial` when any platform fails.
 
 ## 5. Failure Webhook Payload
 
